@@ -2,6 +2,7 @@
 
 from .de import DEMove
 from .de_snooker import DESnookerMove
+from .firefly import FireflyMove
 from .gaussian import GaussianMove
 from .kde import KDEMove
 from .mh import MHMove

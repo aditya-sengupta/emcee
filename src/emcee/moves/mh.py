@@ -18,7 +18,7 @@ class MHMove(Move):
 
     Args:
         proposal_function: The proposal function. It should take 2 arguments: a
-            numpy-compatible random number generator and a ``(K, ndim)`` list
+            numpy-compatible random number generator and a ``(nwalkers, ndim)`` list
             of coordinate vectors. This function should return the proposed
             position and the log-ratio of the proposal probabilities
             (:math:`\ln q(x;\,x^\prime) - \ln q(x^\prime;\,x)` where
