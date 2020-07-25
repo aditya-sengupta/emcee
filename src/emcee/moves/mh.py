@@ -63,3 +63,4 @@ class MHMove(Move):
         state = self.update(state, new_state, accepted)
 
         return state, accepted
+

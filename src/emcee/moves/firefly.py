@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from functools import reduce
 
 from ..state import State
 from .move import Move
@@ -23,7 +22,7 @@ class FireflyMove(Move):
     Takes in a random state, 
     """
 
-    def __init__(self, datapoints, pseudo_log_prob_per, bound_prob, proposal_function, nwalkers, resample_fraction=0.5, ndim=None):
+    def __init__(self, datapoints, pseudo_log_prob_per, bound_prob, proposal_function, nwalkers, resample_fraction=0.5, ndim=None, vectorize=False):
         self.ndim = ndim
         self.nwalkers = nwalkers
         self.get_proposal = proposal_function
@@ -32,6 +31,11 @@ class FireflyMove(Move):
         self.fireflies = np.ones((self.nwalkers, len(datapoints)), dtype=np.bool) # the array of z_n "bright/dark" booleans
         self.pseudo_log_prob_per = pseudo_log_prob_per # f(datapoint n, params) = (Ln-Bn)/Ln
         self.bound_prob = bound_prob
+        self.vectorize = vectorize
+        self.pool = None
+
+    def get_fireflies(self):
+        return ''.join(self.fireflies.astype(int).astype(str))
 
     def compute_pseudo_log_prob(self, coords):
         # a version of ensemble.py:compute_log_prob that incorporates the pseudo-log-prob per datapoint based on 'fireflies'
@@ -54,9 +58,10 @@ class FireflyMove(Move):
             else:
                 map_func = map
 
+            bright_datapoints = np.array([self.datapoints[firefly] for firefly in self.fireflies])
             results = list(
                 map_func(
-                    lambda point: sum([self.pseudo_log_prob_per(d, point) for d in datapoints[fireflies]]),
+                    lambda point: sum([self.pseudo_log_prob_per(d, point) for d in bright_datapoints]),
                     (point for point in p)
                 )
             )
@@ -107,20 +112,34 @@ class FireflyMove(Move):
 
         """
         # Check to make sure that the dimensions match.
+    
         nwalkers, ndim = state.coords.shape
         if (self.ndim is not None and self.ndim != ndim) or self.nwalkers != nwalkers:
             raise ValueError("Dimension mismatch in proposal")
 
         # Get the move-specific proposal.
-        datapoint_choices = np.random.choice(
-            a=len(self.fireflies), 
-            size=(self.nwalkers, int(len(self.fireflies) * self.resample_fraction)), 
+        datapoint_choices = np.array([np.random.choice(
+            a=self.fireflies.shape[-1],
+            size=int(self.fireflies.shape[-1] * self.resample_fraction), 
             replace=False
-        )
-        bound_prob_values = self.bound_prob(datapoints[datapoint_choices], state.coords)
-        log_prob_values = self.pseudo_log_prob_per(datapoints[datapoint_choices], state.coords)
-        self.fireflies[datapoint_choices] = np.random.binomial(n=1, p = 1 - bound_prob_values / log_prob_values)
+        ) for _ in range(self.nwalkers)])
+        
+        bound_prob_values = np.array([self.bound_prob(coord) for coord in state.coords])
+        
+        log_prob_values = np.array([
+            [
+                self.pseudo_log_prob_per(d, param) for d in self.datapoints[choices]
+            ] for choices, param in zip(datapoint_choices, state.coords)
+        ])
+        
+        with np.errstate(divide='ignore'):
+            probs = 1 - np.divide(bound_prob_values, log_prob_values.T).T # a bit ugly
+            # if marginal log prob values are zeros, reduce to regular M-H
+            probs[log_prob_values == 0] = 1
 
+        for i in range(nwalkers):
+            self.fireflies[i][datapoint_choices] = np.random.binomial(n = 1, p = probs[i])
+        
         q, factors = self.get_proposal(state.coords, model.random)
     
         # q : proposed positions
@@ -138,3 +157,4 @@ class FireflyMove(Move):
         state = self.update(state, new_state, accepted)
 
         return state, accepted
+
